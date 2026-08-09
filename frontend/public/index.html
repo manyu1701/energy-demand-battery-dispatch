@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Energy Demand Forecasting &amp; Battery Dispatch</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap">
+        <div>
+          <h1>Energy Demand Forecasting &amp; Battery Dispatch</h1>
+          <p class="subtitle">
+            Forecast hourly grid demand and price, backtest the model across five regimes, then
+            optimize battery charge/discharge against the forecast.
+          </p>
+        </div>
+        <div class="build-info" id="build-info"></div>
+      </div>
+    </header>
+
+    <nav class="tabs wrap" id="tabs">
+      <button class="tab is-active" data-tab="overview">Dataset</button>
+      <button class="tab" data-tab="forecast">Forecast</button>
+      <button class="tab" data-tab="backtest">Backtesting</button>
+      <button class="tab" data-tab="dispatch">Battery dispatch</button>
+    </nav>
+
+    <main class="wrap">
+      <div id="error-banner" class="error-banner" hidden></div>
+
+      <!-- ---------------------------------------------------------------- -->
+      <section class="panel" data-panel="overview">
+        <div class="kpi-row" id="overview-kpis"></div>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>Hourly series</h2>
+              <p class="card-note">
+                Synthetic but structured: annual and daily seasonality, holidays, autocorrelated
+                residuals, renewable-driven negative prices and scarcity spikes. Served straight
+                from the CSV the model was trained on.
+              </p>
+            </div>
+            <div class="controls">
+              <div class="button-group" id="range-buttons">
+                <button data-range="7">7 days</button>
+                <button data-range="30" class="is-active">30 days</button>
+                <button data-range="90">90 days</button>
+                <button data-range="365">Full year</button>
+              </div>
+            </div>
+          </div>
+          <div class="chip-row" id="column-toggles"></div>
+          <div class="legend" data-legend></div>
+          <div class="chart-host" id="series-chart"></div>
+          <p class="card-note" id="series-note"></p>
+        </article>
+
+        <div class="grid-2">
+          <article class="card">
+            <h2>Average day</h2>
+            <p class="card-note">
+              Mean demand and price by hour of day across the whole year — the double peak the
+              battery is built to arbitrage.
+            </p>
+            <div class="legend" data-legend></div>
+            <div class="chart-host short" id="profile-chart"></div>
+          </article>
+          <article class="card">
+            <h2>Daily price range</h2>
+            <p class="card-note">
+              Daily min, mean and max. The gap between min and max is the spread a battery can
+              capture; wide-spread days are where the money is.
+            </p>
+            <div class="legend" data-legend></div>
+            <div class="chart-host short" id="spread-chart"></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- -->
+      <section class="panel" data-panel="forecast" hidden>
+        <div class="card-head standalone">
+          <div class="button-group" id="forecast-target">
+            <button data-target="demand" class="is-active">Demand</button>
+            <button data-target="price">Price</button>
+          </div>
+        </div>
+
+        <div class="kpi-row" id="forecast-kpis"></div>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>Forecast vs actual</h2>
+              <p class="card-note" id="forecast-window"></p>
+            </div>
+            <div class="button-group" id="forecast-zoom">
+              <button data-zoom="168" class="is-active">1 week</button>
+              <button data-zoom="720">1 month</button>
+              <button data-zoom="0">Full test set</button>
+            </div>
+          </div>
+          <div class="legend" data-legend></div>
+          <div class="chart-host" id="forecast-chart"></div>
+        </article>
+
+        <div class="grid-2">
+          <article class="card">
+            <h2>Feature importance</h2>
+            <p class="card-note">
+              Gain share, top 15 features. Lag and rolling features carry the persistence;
+              calendar features carry the shape.
+            </p>
+            <div class="chart-host tall" id="importance-chart"></div>
+          </article>
+          <article class="card">
+            <h2>Error by hour of day</h2>
+            <p class="card-note">
+              Mean absolute error per hour. A model can look fine on average and still be worst at
+              the evening peak — which is exactly when the battery decides whether to discharge.
+            </p>
+            <div class="chart-host tall" id="error-hour-chart"></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- -->
+      <section class="panel" data-panel="backtest" hidden>
+        <div class="card-head standalone">
+          <div class="button-group" id="backtest-target">
+            <button data-target="demand" class="is-active">Demand</button>
+            <button data-target="price">Price</button>
+          </div>
+        </div>
+
+        <article class="card">
+          <h2>Five regimes, one model</h2>
+          <p class="card-note">
+            A single train/test split tells you almost nothing — pick a lucky window and any model
+            looks good. Each regime stresses a different failure mode. <strong>Skill</strong> is
+            measured against a seasonal-naive baseline (same hour, last week); 0% means the model
+            adds nothing over that.
+          </p>
+          <div class="table-wrap">
+            <table class="data-table" id="backtest-table">
+              <thead>
+                <tr>
+                  <th>Regime</th>
+                  <th class="num">WMAPE</th>
+                  <th class="num">Bias</th>
+                  <th class="num">MAE</th>
+                  <th class="num">RMSE</th>
+                  <th class="num">Naive WMAPE</th>
+                  <th class="num">Skill vs naive</th>
+                  <th class="num">Test hours</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>How to read these</h2>
+          <dl class="definition-list" id="regime-glossary"></dl>
+        </article>
+      </section>
+
+      <!-- ---------------------------------------------------------------- -->
+      <section class="panel" data-panel="dispatch" hidden>
+        <div class="kpi-row" id="dispatch-kpis"></div>
+
+        <article class="card">
+          <h2>What the forecast is worth</h2>
+          <p class="card-note" id="dispatch-window"></p>
+          <div class="table-wrap">
+            <table class="data-table" id="strategy-table">
+              <thead>
+                <tr>
+                  <th>Strategy</th>
+                  <th class="num">Profit</th>
+                  <th class="num">% of perfect</th>
+                  <th class="num">Uplift vs fixed rule</th>
+                  <th class="num">Avg charge price</th>
+                  <th class="num">Avg discharge price</th>
+                  <th class="num">Full cycles</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>Dispatch schedule — most volatile week</h2>
+              <p class="card-note">
+                Bars are charging (positive) and discharging (negative); the line is the price the
+                schedule was settled at. The battery buys the troughs and sells the peaks.
+              </p>
+            </div>
+            <div class="button-group" id="dispatch-strategy"></div>
+          </div>
+          <div class="legend" data-legend></div>
+          <div class="chart-host" id="dispatch-chart"></div>
+        </article>
+
+        <div class="grid-2">
+          <article class="card">
+            <h2>Cumulative profit</h2>
+            <p class="card-note">
+              Running total over the test window. The gap between forecast-driven and perfect
+              foresight is the cost of forecast error.
+            </p>
+            <div class="legend" data-legend></div>
+            <div class="chart-host short" id="profit-chart"></div>
+          </article>
+          <article class="card">
+            <h2>Storage duration sweep</h2>
+            <p class="card-note">
+              Same 20 MWh of energy, different power ratings. More power earns more in total, but
+              cycles the battery far harder for a narrower spread per cycle. Degradation cost is
+              not modelled here — which is exactly why the highest-power option looks best, and why
+              this table is a starting point for a sizing decision rather than the answer to it.
+            </p>
+            <div class="table-wrap">
+              <table class="data-table compact" id="sweep-table">
+                <thead>
+                  <tr>
+                    <th>Configuration</th>
+                    <th class="num">Profit</th>
+                    <th class="num">Cycles</th>
+                    <th class="num">Charge / discharge spread</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="wrap site-footer">
+      <p>
+        Synthetic data, open-source solver (CBC via PuLP), no proprietary inputs. Rebuild the
+        artifacts with <code>python scripts/build_dashboard_data.py</code>.
+      </p>
+    </footer>
+
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>
