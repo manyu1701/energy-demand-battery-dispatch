@@ -105,17 +105,37 @@ the ~2% of hours when renewables plus must-run generation over-serve load.
 Regenerate it with `python scripts/generate_sample_data.py` — it is
 deterministic, and CI checks the committed file still matches the code.
 
-To use real data instead, download one of:
+### Real data
 
-- **Open Power System Data** — [time_series](https://data.open-power-system-data.org/time_series/)
-  — hourly load and day-ahead price for several European countries, free, no
-  account, CC-BY licensed.
-- **EIA hourly demand** — [api.eia.gov](https://api.eia.gov) — US balancing-authority
-  demand, free API key.
+Vetted public sources, with licences and caveats, are documented in
+[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md). `scripts/fetch_real_data.py`
+downloads from them into `data/raw/` and writes the canonical schema that
+`load_real_data()` reads:
 
-Save it under `data/raw/` and point `load_real_data()` in `src/data/loader.py`
-at it. Nothing downstream changes: the feature builder, the model and the
-optimizer all take a plain hourly `DataFrame`.
+```bash
+python scripts/fetch_real_data.py opsd --zone DE          # EU load + price, no account
+python scripts/fetch_real_data.py open-meteo --lat 52.52 --lon 13.41 \
+    --start 2015-01-01 --end 2020-09-30                   # ERA5 temperature, no account
+python scripts/fetch_real_data.py merge \
+    --merge data/raw/opsd_de_hourly.csv \
+    --with  data/raw/open_meteo_52.52_13.41_hourly.csv
+```
+
+The recommended starting point is **Open Power System Data** (CC-BY 4.0, no
+account) — one file carries hourly load and day-ahead price for 30+ European
+zones on a single index, compiled from the ENTSO-E Transparency Platform.
+**Fraunhofer ISE energy-charts** covers recent years, and **Open-Meteo ERA5**
+supplies temperature. For US demand, **EIA Form EIA-930** needs a free key and
+publishes no prices.
+
+Nothing downstream changes: the feature builder, model and optimizer all take
+a plain hourly `DataFrame`. What does change is the data quality —
+`normalize_hourly_frame()` handles the missing hours, DST folds, duplicate
+timestamps, sub-hourly feeds and zero-as-null outages that real feeds carry,
+and refuses a series that is more than 5% missing rather than modelling a
+gap-filled fiction.
+
+No third-party data is committed: `data/raw/` is gitignored.
 
 ## Project structure
 
@@ -129,6 +149,8 @@ src/
 scripts/
   generate_sample_data.py            rebuild the committed dataset
   build_dashboard_data.py            run the pipeline, export dashboard JSON
+  fetch_real_data.py                 download real data from public sources
+docs/DATA_SOURCES.md                 vetted sources, licences, caveats
 frontend/
   server.js, lib/                    Express API over the CSV and the artifacts
   public/                            dashboard UI, hand-rolled SVG charts
@@ -137,7 +159,7 @@ data/
   sample/                            the committed dataset
   dashboard/                         generated artifacts the dashboard reads
 examples/run_battery_demo.py         standalone optimizer demo
-tests/                               pytest suite (76 tests)
+tests/                               pytest suite (95 tests)
 ```
 
 ## Roadmap

@@ -15,7 +15,9 @@ Three modes:
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -248,23 +250,269 @@ def load_sample_dataset(filename: str = SAMPLE_FILENAME) -> pd.DataFrame:
     return pd.read_csv(path, parse_dates=["timestamp"]).set_index("timestamp")
 
 
-def load_real_data(filename: str = "load_and_price.csv") -> pd.DataFrame:
+# --------------------------------------------------------------------------
+# Real data ingestion
+#
+# Everything below exists because real grid data is messier than the generator
+# above: hours go missing, clocks change twice a year, the same timestamp is
+# reported twice, some feeds publish sub-hourly, and outages are reported as
+# zero rather than null. The pipeline downstream assumes a clean, gap-free,
+# strictly hourly UTC index, so the mess is dealt with here, once, loudly.
+#
+# See docs/DATA_SOURCES.md for the vetted sources and their licences, and
+# scripts/fetch_real_data.py for the downloader.
+# --------------------------------------------------------------------------
+
+CANONICAL_COLUMNS = ("demand_mw", "price_eur_mwh", "temperature_c")
+
+
+class DataQualityError(ValueError):
+    """Raised when a real dataset is too damaged to model honestly."""
+
+
+def _resolve_column(columns: list[str], candidates: Sequence[str], pattern: Optional[str] = None):
+    """Find the first matching column by exact name, then by regex."""
+    for candidate in candidates:
+        if candidate in columns:
+            return candidate
+    if pattern:
+        matches = [c for c in columns if re.fullmatch(pattern, c)]
+        if matches:
+            return sorted(matches)[0]
+    return None
+
+
+def normalize_hourly_frame(
+    frame: pd.DataFrame,
+    timestamp_col: str,
+    rename: dict[str, str],
+    *,
+    max_gap_hours: int = 3,
+    max_missing_share: float = 0.05,
+    treat_zero_as_missing: Sequence[str] = ("demand_mw",),
+) -> pd.DataFrame:
     """
-    Load a real hourly load/price CSV from data/raw/.
+    Turn a raw provider export into the project's canonical hourly frame.
 
-    Get real data from one of:
-      - Open Power System Data: https://data.open-power-system-data.org/time_series/
-        (no account needed, direct CSV download, CC-BY licensed)
-      - EIA hourly demand: https://api.eia.gov (free API key required)
+    Steps, in order:
+      1. parse timestamps as UTC (never local time — see the DST note below)
+      2. drop rows with an unparseable or duplicated timestamp
+      3. rename provider columns to canonical names and coerce to float
+      4. resample to hourly means if the feed is sub-hourly (15/30 min)
+      5. reindex onto a complete hourly range, exposing every missing hour
+      6. treat zeros in `treat_zero_as_missing` columns as missing
+      7. interpolate gaps up to `max_gap_hours`, leave longer ones as NaN
 
-    Expected columns after your own light renaming: timestamp, demand_mw,
-    price_eur_mwh (rename to match whatever units/currency your source uses).
+    On DST: local-time series repeat an hour every autumn and skip one every
+    spring. A duplicated index silently corrupts lag features, and pandas will
+    happily build one. Every source here is therefore read from its UTC
+    column, and a non-monotonic or duplicated index is an error, not a warning.
+
+    Raises DataQualityError if more than `max_missing_share` of the expected
+    hours are still missing after interpolation — at that point the series
+    should be fixed or narrowed, not modelled.
+    """
+    if timestamp_col not in frame.columns:
+        raise KeyError(f"timestamp column {timestamp_col!r} not in {list(frame.columns)}")
+
+    missing_inputs = [src for src in rename if src not in frame.columns]
+    if missing_inputs:
+        raise KeyError(
+            f"source column(s) {missing_inputs} not found. Available: {list(frame.columns)}"
+        )
+
+    out = frame[[timestamp_col, *rename]].rename(columns={timestamp_col: "timestamp", **rename})
+
+    out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    out = out.dropna(subset=["timestamp"])
+    # Keep the first reading of a repeated timestamp: providers re-publish
+    # corrections by appending, and the autumn DST fold produces exact dupes.
+    out = out.drop_duplicates(subset=["timestamp"], keep="first")
+
+    out = out.set_index("timestamp").sort_index()
+    out.index = out.index.tz_convert("UTC").tz_localize(None)
+    out.index.name = "timestamp"
+
+    for column in out.columns:
+        out[column] = pd.to_numeric(out[column], errors="coerce")
+
+    if out.empty:
+        raise DataQualityError("no usable rows after timestamp parsing")
+
+    # Sub-hourly feeds (energy-charts publishes 15-minute prices) collapse to
+    # hourly means, which is what "hourly price" means in a day-ahead market.
+    inferred = out.index.to_series().diff().dropna().min()
+    if inferred is not None and inferred < pd.Timedelta(hours=1):
+        out = out.resample("h").mean()
+
+    for column in treat_zero_as_missing:
+        if column in out.columns:
+            # A balancing area never actually consumes 0 MW; ENTSO-E reports
+            # failed submissions as zero, which would otherwise train the model
+            # to predict blackouts.
+            out.loc[out[column] == 0, column] = np.nan
+
+    full_range = pd.date_range(out.index.min(), out.index.max(), freq="h")
+    out = out.reindex(full_range)
+    out.index.name = "timestamp"
+
+    before = out.isna().sum()
+    out = out.interpolate(method="time", limit=max_gap_hours, limit_direction="both")
+    after = out.isna().sum()
+
+    for column in out.columns:
+        share = after[column] / len(out)
+        if share > max_missing_share:
+            raise DataQualityError(
+                f"{column}: {after[column]:,} of {len(out):,} hours "
+                f"({share:.1%}) still missing after interpolating gaps up to "
+                f"{max_gap_hours}h — exceeds max_missing_share={max_missing_share:.0%}. "
+                "Narrow the date range or pick a zone with better coverage."
+            )
+        if before[column]:
+            print(
+                f"  {column}: filled {before[column] - after[column]:,} missing hours, "
+                f"{after[column]:,} left as NaN"
+            )
+
+    return out
+
+
+def data_quality_report(df: pd.DataFrame) -> dict:
+    """
+    Summarize what a real dataset actually looks like.
+
+    Worth printing before trusting any result computed from a fresh download —
+    a series that is 4% interpolated will quietly flatter the lag features.
+    """
+    expected = pd.date_range(df.index.min(), df.index.max(), freq="h")
+    report = {
+        "rows": len(df),
+        "expected_hours": len(expected),
+        "start": df.index.min(),
+        "end": df.index.max(),
+        "duplicated_timestamps": int(df.index.duplicated().sum()),
+        "missing_hours": int(len(expected) - len(df.index.intersection(expected))),
+        "columns": {},
+    }
+    for column in df.columns:
+        series = df[column]
+        report["columns"][column] = {
+            "nulls": int(series.isna().sum()),
+            "null_share": float(series.isna().mean()),
+            "min": float(series.min()) if series.notna().any() else None,
+            "max": float(series.max()) if series.notna().any() else None,
+            "mean": float(series.mean()) if series.notna().any() else None,
+            "zeros": int((series == 0).sum()),
+        }
+    return report
+
+
+def load_opsd_timeseries(
+    path: Path | str,
+    zone: str = "DE",
+    *,
+    with_weather: bool = False,
+) -> pd.DataFrame:
+    """
+    Extract one bidding zone from an Open Power System Data time-series file.
+
+    OPSD ships every country in one wide CSV with columns like
+    `DE_load_actual_entsoe_transparency` and `DE_LU_price_day_ahead`, so the
+    right columns have to be resolved rather than assumed. Two traps this
+    handles:
+
+      * Germany's price column is `DE_LU_price_day_ahead` only after the
+        Germany/Austria bidding zone split on 2018-10-01; before that the same
+        series lives under `DE_AT_LU_price_day_ahead`. Both are matched.
+      * Load is published by two ENTSO-E systems (Transparency and Power
+        Statistics) with different coverage. Transparency is preferred and
+        Power Statistics is the fallback.
+
+    Download the file with `python scripts/fetch_real_data.py opsd`.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not found. Download it with: python scripts/fetch_real_data.py opsd"
+        )
+
+    header = pd.read_csv(path, nrows=0)
+    columns = list(header.columns)
+
+    timestamp_col = _resolve_column(columns, ["utc_timestamp", "timestamp"])
+    if timestamp_col is None:
+        raise KeyError(
+            "No UTC timestamp column found. OPSD files carry `utc_timestamp`; "
+            "reading the local `cet_cest_timestamp` column instead would "
+            f"duplicate an hour at every DST change. Columns: {columns[:8]}..."
+        )
+
+    load_col = _resolve_column(
+        columns,
+        [f"{zone}_load_actual_entsoe_transparency", f"{zone}_load_actual_entsoe_power_statistics"],
+        pattern=rf"{re.escape(zone)}_load_actual_.*",
+    )
+    price_col = _resolve_column(
+        columns,
+        [f"{zone}_price_day_ahead"],
+        # DE also appears as DE_LU_ and DE_AT_LU_ depending on the era.
+        pattern=rf"{re.escape(zone)}(_[A-Z]{{2}})*_price_day_ahead",
+    )
+
+    if load_col is None or price_col is None:
+        zones = sorted({c.split("_")[0] for c in columns if c.endswith("_price_day_ahead")})
+        raise KeyError(
+            f"Zone {zone!r} is missing a load or price column "
+            f"(load={load_col}, price={price_col}). "
+            f"Zones with day-ahead prices in this file: {zones}"
+        )
+
+    rename = {load_col: "demand_mw", price_col: "price_eur_mwh"}
+    usecols = [timestamp_col, load_col, price_col]
+
+    if with_weather:
+        temp_col = _resolve_column(columns, [f"{zone}_temperature"], pattern=rf"{re.escape(zone)}_temperature.*")
+        if temp_col:
+            rename[temp_col] = "temperature_c"
+            usecols.append(temp_col)
+
+    print(f"OPSD {zone}: load={load_col!r} price={price_col!r}")
+    raw = pd.read_csv(path, usecols=usecols)
+    return normalize_hourly_frame(raw, timestamp_col, rename)
+
+
+def load_real_data(filename: str = "load_and_price.csv", normalize: bool = True) -> pd.DataFrame:
+    """
+    Load a real hourly dataset from data/raw/ in the project's canonical shape.
+
+    Expects the columns `timestamp`, `demand_mw`, `price_eur_mwh` and
+    optionally `temperature_c` — which is exactly what
+    scripts/fetch_real_data.py writes. Pass `normalize=False` to skip gap
+    filling and get the file back untouched.
+
+    See docs/DATA_SOURCES.md for where to get the data and what each source
+    costs you in coverage, latency and licence terms.
     """
     path = RAW_DIR / filename
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. Download real data (see docstring for sources) "
-            f"and save it as data/raw/{filename}, or use generate_synthetic_sample() "
-            "for local development."
+            f"{path} not found. Download real data with "
+            f"`python scripts/fetch_real_data.py --help` (see docs/DATA_SOURCES.md), "
+            "or use load_sample_dataset() for the committed synthetic data."
         )
-    return pd.read_csv(path, parse_dates=["timestamp"]).set_index("timestamp")
+
+    raw = pd.read_csv(path)
+    if "timestamp" not in raw.columns:
+        raise KeyError(f"{path} has no `timestamp` column; found {list(raw.columns)}")
+
+    if not normalize:
+        return raw.assign(timestamp=pd.to_datetime(raw["timestamp"])).set_index("timestamp")
+
+    rename = {c: c for c in CANONICAL_COLUMNS if c in raw.columns}
+    if not rename:
+        raise KeyError(
+            f"{path} has none of the canonical columns {CANONICAL_COLUMNS}; "
+            f"found {list(raw.columns)}"
+        )
+    return normalize_hourly_frame(raw, "timestamp", rename)
