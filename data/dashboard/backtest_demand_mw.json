@@ -1,0 +1,102 @@
+{
+ "target": "demand_mw",
+ "unit": "MW",
+ "regimes": [
+  {
+   "regime": "temporal",
+   "wmape": 0.032726,
+   "bias": 0.014417,
+   "mae": 51.321555,
+   "rmse": 68.312936,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.065699,
+   "skill_vs_naive": 0.501883,
+   "n_features": 18
+  },
+  {
+   "regime": "random",
+   "wmape": 0.021453,
+   "bias": -0.000442,
+   "mae": 31.808857,
+   "rmse": 41.793244,
+   "n_train": 6849,
+   "n_test": 1743,
+   "baseline_wmape": 0.072645,
+   "skill_vs_naive": 0.704692,
+   "n_features": 18
+  },
+  {
+   "regime": "recency_weighted",
+   "wmape": 0.035084,
+   "bias": 0.001545,
+   "mae": 55.019518,
+   "rmse": 72.346978,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.065699,
+   "skill_vs_naive": 0.465991,
+   "n_features": 18
+  },
+  {
+   "regime": "short_horizon_24h",
+   "wmape": 0.038269,
+   "bias": -0.015695,
+   "mae": 68.908646,
+   "rmse": 77.507434,
+   "n_train": 8568,
+   "n_test": 24,
+   "baseline_wmape": 0.068706,
+   "skill_vs_naive": 0.443007,
+   "n_features": 18
+  },
+  {
+   "regime": "ablation_without_calendar",
+   "wmape": 0.050934,
+   "bias": -0.013544,
+   "mae": 79.876531,
+   "rmse": 102.593253,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.065699,
+   "skill_vs_naive": 0.224734,
+   "n_features": 9
+  },
+  {
+   "regime": "ablation_without_lag",
+   "wmape": 0.027664,
+   "bias": 0.006278,
+   "mae": 43.383176,
+   "rmse": 59.657543,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.065699,
+   "skill_vs_naive": 0.578931,
+   "n_features": 16
+  },
+  {
+   "regime": "ablation_without_rolling",
+   "wmape": 0.035514,
+   "bias": 0.019464,
+   "mae": 55.693064,
+   "rmse": 73.830572,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.065699,
+   "skill_vs_naive": 0.459454,
+   "n_features": 14
+  },
+  {
+   "regime": "ablation_without_weather",
+   "wmape": 0.052639,
+   "bias": -0.036332,
+   "mae": 82.54938,
+   "rmse": 102.256326,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.065699,
+   "skill_vs_naive": 0.198792,
+   "n_features": 15
+  }
+ ]
+}

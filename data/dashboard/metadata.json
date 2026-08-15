@@ -1,0 +1,9 @@
+{
+ "generated_at": "2026-08-09T16:14:24.606985+00:00",
+ "dataset": "data/sample/hourly_energy_sample.csv (synthetic, committed)",
+ "rows": 8760,
+ "test_size": 0.2,
+ "model": "LightGBM regressor, calendar + lag + rolling + weather features",
+ "build_seconds": 14.6,
+ "sweep_included": true
+}

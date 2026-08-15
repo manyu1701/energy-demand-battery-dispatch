@@ -1,0 +1,19 @@
+{
+  "name": "energy-dispatch-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node.js dashboard for the energy demand forecasting and battery dispatch project",
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

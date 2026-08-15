@@ -1,0 +1,102 @@
+{
+ "target": "price_eur_mwh",
+ "unit": "EUR/MWh",
+ "regimes": [
+  {
+   "regime": "temporal",
+   "wmape": 0.134542,
+   "bias": -0.058834,
+   "mae": 11.520465,
+   "rmse": 22.547622,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.187831,
+   "skill_vs_naive": 0.283707,
+   "n_features": 18
+  },
+  {
+   "regime": "random",
+   "wmape": 0.075282,
+   "bias": -0.000477,
+   "mae": 6.280529,
+   "rmse": 15.741612,
+   "n_train": 6849,
+   "n_test": 1743,
+   "baseline_wmape": 0.181837,
+   "skill_vs_naive": 0.585991,
+   "n_features": 18
+  },
+  {
+   "regime": "recency_weighted",
+   "wmape": 0.118859,
+   "bias": -0.067446,
+   "mae": 10.177535,
+   "rmse": 21.203929,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.187831,
+   "skill_vs_naive": 0.367204,
+   "n_features": 18
+  },
+  {
+   "regime": "short_horizon_24h",
+   "wmape": 0.091474,
+   "bias": -0.027107,
+   "mae": 8.191886,
+   "rmse": 10.133463,
+   "n_train": 8568,
+   "n_test": 24,
+   "baseline_wmape": 0.10013,
+   "skill_vs_naive": 0.086449,
+   "n_features": 18
+  },
+  {
+   "regime": "ablation_without_calendar",
+   "wmape": 0.148545,
+   "bias": -0.025081,
+   "mae": 12.719449,
+   "rmse": 23.638537,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.187831,
+   "skill_vs_naive": 0.209159,
+   "n_features": 9
+  },
+  {
+   "regime": "ablation_without_lag",
+   "wmape": 0.133611,
+   "bias": -0.073713,
+   "mae": 11.440746,
+   "rmse": 22.606321,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.187831,
+   "skill_vs_naive": 0.288663,
+   "n_features": 16
+  },
+  {
+   "regime": "ablation_without_rolling",
+   "wmape": 0.125449,
+   "bias": -0.037664,
+   "mae": 10.741805,
+   "rmse": 21.75475,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.187831,
+   "skill_vs_naive": 0.332121,
+   "n_features": 14
+  },
+  {
+   "regime": "ablation_without_weather",
+   "wmape": 0.150945,
+   "bias": -0.103185,
+   "mae": 12.924973,
+   "rmse": 23.247605,
+   "n_train": 6873,
+   "n_test": 1719,
+   "baseline_wmape": 0.187831,
+   "skill_vs_naive": 0.196381,
+   "n_features": 15
+  }
+ ]
+}

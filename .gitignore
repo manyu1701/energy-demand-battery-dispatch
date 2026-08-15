@@ -9,3 +9,8 @@ data/processed/*
 .DS_Store
 *.egg-info/
 .pytest_cache/
+node_modules/
+npm-debug.log*
+
+# Local Claude Code / agent settings
+.claude/
